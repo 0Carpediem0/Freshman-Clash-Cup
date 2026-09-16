@@ -3,19 +3,20 @@ const project=process.argv[2],data=fs.mkdtempSync(path.join(require('node:os').t
 const child=spawn(process.execPath,[path.join(project,'server.cjs')],{env:{...process.env,PORT:'4174',CUP_DATA_DIR:data},stdio:['ignore','pipe','pipe']});
 let cookie='';async function call(route,body,auth=true,source=origin){const response=await fetch(origin+route,{method:body?'POST':'GET',headers:{...(body?{'Content-Type':'application/json',Origin:source}:{}),...(auth&&cookie?{Cookie:cookie}:{})},body:body?JSON.stringify(body):undefined});let json;try{json=await response.json()}catch{}return {status:response.status,json,headers:response.headers}}
 (async()=>{await new Promise((resolve,reject)=>{child.stdout.once('data',resolve);child.once('error',reject);child.once('exit',()=>reject(Error('Server quit')))});
-assert.equal((await call('/api/state')).json.admin,false);
+assert.equal((await call('/api/state')).json.admin,false);assert.equal((await call('/api/state')).json.viewer,null);
 for(const action of ['seed','remove','generate','regenerate','reset','start','result','game','note','modes','friend'])assert.equal((await call('/api/action',{action,revision:0},false)).status,401);
 assert.equal((await call('/data/auth.json')).status,404);assert.equal((await call('/data/admin-access.txt')).status,404);
 assert.equal((await call('/api/login',{password:'wrong'},false)).status,401);
-const password=fs.readFileSync(path.join(data,'admin-access.txt'),'utf8').split('\n')[0].split(': ')[1];
-let login=await call('/api/login',{password},false);assert.equal(login.status,200);assert(login.headers.get('set-cookie').includes('HttpOnly'));assert(login.headers.get('set-cookie').includes('SameSite=Strict'));cookie=login.headers.get('set-cookie').split(';')[0];
+const access=fs.readFileSync(path.join(data,'admin-access.txt'),'utf8'),password=access.match(/1\) Login: organizer1\nPassword: (\S+)|1\) Логин: organizer1\nПароль: (\S+)/)?.slice(1).find(Boolean),password2=access.match(/2\) Login: organizer2\nPassword: (\S+)|2\) Логин: organizer2\nПароль: (\S+)/)?.slice(1).find(Boolean);assert(password);assert(password2);
+let login=await call('/api/login',{login:'organizer1',password},false);assert.equal(login.status,200);assert.equal(login.json.viewer.role,'organizer');assert(login.headers.get('set-cookie').includes('HttpOnly'));assert(login.headers.get('set-cookie').includes('SameSite=Strict'));cookie=login.headers.get('set-cookie').split(';')[0];
 assert.equal((await call('/api/action',{action:'reset',revision:0},true,'https://untrusted.example')).status,403);
 let current=(await call('/api/state')).json.state;
 assert.equal((await call('/api/register',{name:'Bad',nick:'Bad',tag:'#BAD',friendLink:'javascript:alert(1)'},false)).status,400);
 assert.equal((await call('/api/register',{name:'Bad',nick:'Bad',tag:'#BAD',friendLink:'https://link.clashroyale.com.evil.example/'},false)).status,400);
 assert.equal((await call('/api/register',{name:'Bad',nick:'Bad',tag:'#BAD'},false)).status,400);
-for(let i=0;i<13;i++){const r=await call('/api/register',{name:`Name ${i}`,nick:`Nick ${i}`,tag:`#TEST${i}`,friendCode:`FRIEND${i}`},false);assert.equal(r.status,200);current=r.json.state}
-assert.equal((await call('/api/state',undefined,false)).json.state.players[0].friendCode,'FRIEND0');
+for(let i=0;i<13;i++){const r=await call('/api/register',{login:`player${i}`,password:'participant-pass-123',name:`Name ${i}`,nick:`Nick ${i}`,tag:`#TEST${i}`,friendCode:`FRIEND${i}`},false);assert.equal(r.status,200);assert.equal(r.json.viewer.role,'participant');current=r.json.state}
+const adminCookie=cookie,participantLogin=await call('/api/login',{login:'player0',password:'participant-pass-123'},false);cookie=participantLogin.headers.get('set-cookie').split(';')[0];assert.equal((await call('/api/action',{action:'reset',revision:current.revision})).status,401);let profile=await call('/api/profile',{name:'Updated Name',nick:'Updated Nick',tag:'#TEST0',friendCode:'NEWCODE'});assert.equal(profile.status,200);assert.equal(profile.json.state.players[0].nick,'Updated Nick');current=profile.json.state;cookie=adminCookie;
+assert.equal((await call('/api/state',undefined,false)).json.state.players[0].friendCode,'NEWCODE');
 assert.equal((await call('/api/action',{action:'modes',pool:[],revision:current.revision})).status,400);
 current=(await call('/api/action',{action:'modes',pool:['triple'],revision:current.revision})).json.state;
 assert.equal((await call('/api/register',{name:'Duplicate',nick:'Dup',tag:'#TEST0'},false)).status,400);
@@ -29,7 +30,7 @@ for(let i=0;i<current.rounds[r].length;i++){if(current.rounds[r][i].status==='by
 assert.equal(count,12);assert(current.rounds.at(-1)[0].winner);assert.equal((await call('/api/state',undefined,false)).json.state.rounds.at(-1)[0].note,'Результат подтверждён');
 assert.equal((await call('/api/state',undefined,false)).json.state.log.length,0);
 await call('/api/logout',{});assert.equal((await call('/api/action',{action:'reset',revision:current.revision})).status,401);
-login=await call('/api/login',{password},false);cookie=login.headers.get('set-cookie').split(';')[0];const next='test-only-long-password-123';assert.equal((await call('/api/password',{current:password,password:next})).status,200);assert.equal((await call('/api/state')).json.admin,false);assert.equal((await call('/api/login',{password},false)).status,401);assert.equal((await call('/api/login',{password:next},false)).status,200);
+login=await call('/api/login',{login:'organizer1',password},false);cookie=login.headers.get('set-cookie').split(';')[0];const next='test-only-long-password-123';assert.equal((await call('/api/password',{current:password,password:next})).status,200);assert.equal((await call('/api/state')).json.admin,false);assert.equal((await call('/api/login',{login:'organizer1',password},false)).status,401);assert.equal((await call('/api/login',{login:'organizer1',password:next},false)).status,200);assert.equal((await call('/api/login',{login:'organizer2',password:password2},false)).status,200);
 for(let i=0;i<8;i++)assert.equal((await call('/api/login',{password:'bad'},false)).status,401);assert.equal((await call('/api/login',{password:'bad'},false)).status,429);
 const saved=JSON.parse(fs.readFileSync(path.join(data,'tournament.json'),'utf8'));assert.equal(saved.rounds.at(-1)[0].winner,current.rounds.at(-1)[0].winner);
 console.log('PASS: friendship validation; public match data; protected actions; mode pool; fixed roulette; reveal delay; BO3/BO5 per-game progression; comments; 13-player champion; authentication regression.');
