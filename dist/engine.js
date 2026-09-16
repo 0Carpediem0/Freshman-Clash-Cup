@@ -1,0 +1,8 @@
+(function(root){
+const shuffle=a=>{a=[...a];for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]]}return a};
+function generate(players){if(players.length<2)throw Error('Нужно минимум два участника');const size=2**Math.ceil(Math.log2(players.length)),byes=size-players.length,p=shuffle(players).map(x=>x.id),rounds=[];let at=0;rounds.push(Array.from({length:size/2},(_,i)=>({p:i<byes?[p[at++],null]:[p[at++],p[at++]],status:i<byes?'bye':'waiting',score:null,winner:null})));for(let n=size/4;n>=1;n/=2)rounds.push(Array.from({length:n},()=>({p:[null,null],status:'waiting',score:null,winner:null})));rounds[0].forEach(m=>{if(m.status==='bye')m.winner=m.p[0]});propagate(rounds);return rounds}
+function propagate(rounds){for(let r=1;r<rounds.length;r++)rounds[r].forEach((m,i)=>{m.p=[rounds[r-1][i*2].winner,rounds[r-1][i*2+1].winner]})}
+function locked(rounds,r,i){if(r===rounds.length-1)return false;const m=rounds[r+1][Math.floor(i/2)];return m.status!=='waiting'}
+function result(rounds,r,i,a,b,technical=false){const m=rounds[r][i],target=r===rounds.length-1?3:2;if(!m.p.every(Boolean)||m.status==='bye')throw Error('Соперники ещё не определены');if(locked(rounds,r,i))throw Error('Следующий матч уже начался — результат защищён');if(!Number.isInteger(a)||!Number.isInteger(b)||Math.max(a,b)!==target||Math.min(a,b)<0||Math.min(a,b)>=target)throw Error(`Укажите счёт до ${target} побед, без ничьей`);m.score=[a,b];m.winner=m.p[a>b?0:1];m.status='done';m.technical=technical;propagate(rounds)}
+root.Tournament={generate,propagate,locked,result};if(typeof module!=='undefined')module.exports=root.Tournament;
+})(globalThis);
